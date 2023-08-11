@@ -1,0 +1,600 @@
+---
+title: '1'
+output: html_document
+date: '2022-11-24'
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(car)
+library(jtools)
+library(splines)
+library(caret)
+library(arm)
+library(pROC)
+library(predtools)
+
+```
+
+```{r pressure, echo=FALSE}
+par(mar = c(1,1,1,1))
+
+```
+
+
+## Path for loading
+```{r pressure, echo=FALSE}
+path = 'S://NDL/MouleshWorkings/Extracts2/'
+```
+
+
+# load data
+```{r pressure, echo=FALSE}
+efi = read.csv('S://NDL/MouleshWorkings/230110_EFI_adjusted.csv')
+
+efi$carer = ifelse(efi$Carer_Flag=='Carer',1,0)
+efi$carer = as.factor(efi$carer)
+efi$Gender = as.factor(efi$Gender)
+efi$age = as.numeric(  as.character(efi$age )  )
+efi$IMDDecile = as.numeric(  as.character(efi$IMDDecile )  )
+efi$EthnicCategory = as.factor(efi$EthnicCategory)
+
+# remove irrelevant data
+efi = efi[!efi$IMDDecile==-2,]
+efi = efi[!efi$Gender=='Other',]
+efi = efi[!efi$Gender=='Unknown',]
+efi$Gender = droplevels(efi$Gender)
+```
+
+
+```{r pressure, echo=FALSE}
+
+summary(efi$carer) 
+
+summary(efi$Gender) 
+
+summary(efi$IMDDecile) 
+
+summary(efi$age) 
+
+summary(efi$EthnicCategory) 
+
+summary(efi$Count)
+
+```
+
+
+
+
+## set path for saving and save the data
+```{r pressure, echo=FALSE}
+path = 'S://NDL/MouleshWorkings/2_efi_pam_bmi/efi/'
+write.csv(efi, paste(path, 'data.csv', sep=''))
+
+```
+
+## create subsets of efi by counts
+```{r pressure, echo=FALSE}
+efi_15 = efi[efi$efiCountNumber<16,]
+efi_16 = efi[efi$efiCountNumber<17,]
+efi_17 = efi[efi$efiCountNumber<18,]
+efi_18 = efi[efi$efiCountNumber<18,]
+efi_19 = efi[efi$efiCountNumber<18,]
+
+efi_15a = efi[efi$efiCountNumber>=16,]
+efi_16a = efi[efi$efiCountNumber>=17,]
+efi_17a = efi[efi$efiCountNumber>=18,]
+efi_18a = efi[efi$efiCountNumber>=18,]
+efi_19a = efi[efi$efiCountNumber>=18,]
+
+```
+
+
+## create binary outcome for efi counts
+```{r pressure, echo=FALSE}
+# print( paste('Fit: ', min(efi[efi$ElectronicFrailtyIndex=='Fit',]$efiCountNumber), '-', max(efi[efi$eFICategory=='Fit',]$efiCountNumber))  )
+# print( paste('Mild: ', min(efi[efi$ElectronicFrailtyIndex=='Mild',]$efiCountNumber), '-', max(efi[efi$eFICategory=='Mild',]$efiCountNumber))  )
+# print( paste('Moderate: ', min(efi[efi$ElectronicFrailtyIndex=='Moderate',]$efiCountNumber), '-', max(efi[efi$eFICategory=='Moderate',]$efiCountNumber))  )
+# print( paste('Severe: ', min(efi[efi$ElectronicFrailtyIndex=='Severe',]$efiCountNumber), '-', max(efi[efi$eFICategory=='Severe',]$efiCountNumber))  )
+
+efi$efi_cat_mild = ifelse(efi$Count>4,1,0)
+efi$efi_cat_moderate = ifelse(efi$Count>7,1,0)
+efi$efi_cat_severe = ifelse(efi$Count>11,1,0)
+
+efi$efi15 = ifelse(efi$Count>15,1,0)
+efi$efi16 = ifelse(efi$Count>16,1,0)
+efi$efi17 = ifelse(efi$Count>17,1,0)
+efi$efi18 = ifelse(efi$Count>18,1,0)
+efi$efi19 = ifelse(efi$Count>19,1,0)
+
+#efi_15 = efi[efi$efiCountNumber<16,]
+#efi_16 = efi[efi$efiCountNumber<17,]
+#efi_17 = efi[efi$efiCountNumber<18,]
+#efi_18 = efi[efi$efiCountNumber<18,]
+#efi_19 = efi[efi$efiCountNumber<18,]
+
+
+
+
+
+
+```
+
+## Explore carer VS efi categories
+```{r pressure, echo=FALSE}
+summary(efi$carer)
+summary(efi$efi_cat_moderate)
+
+table(efi$carer, efi$efi_cat_moderate)
+prop.table( table(efi$carer, efi$efi_cat_moderate) )
+
+
+```
+
+
+
+# some descriptive graphs to compare group with eFI <=15 and more than 15
+```{r pressure, echo=FALSE}
+p1 = ggplot(efi,aes(x = Count)) + geom_histogram(binwidth=1) + xlab('eFI')
+png(paste(path,'0_efi_counts.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+
+p1 = ggplot(efi,aes(x = Count)) + geom_histogram(binwidth=1) + xlab('eFI') +
+  facet_wrap(~efi_cat_moderate)
+png(paste(path,'0_efi_splits_mod.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+
+
+p1 = ggplot(efi,aes(x = age)) + geom_histogram(binwidth=5) + xlab('Age') +
+  facet_wrap(~efi_cat_moderate)
+png(paste(path,'0_age_splits_mod.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+p2 = ggplot(efi,aes(x = Gender)) + geom_bar() + xlab('Gender') +  facet_wrap(~efi_cat_moderate)
+png(paste(path,'0_gender_splits_mod.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p2)
+dev.off()
+
+p3 = ggplot(efi, aes(x = IMDDecile)) +
+  geom_bar() + xlab('IMDDecile') +
+  scale_x_continuous(breaks = scales::pretty_breaks(n= 10)) +
+  facet_wrap(~efi_cat_moderate)+
+  labs(x = 'IMDDecile', y = 'Counts') 
+  #theme(axis.text = element_text(size = 20))+
+  #theme(axis.title = element_text(size = 24, face = 'bold'))
+png(paste(path,'0_imd_splits_mod.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p3)
+dev.off()
+
+p4 = ggplot(efi,aes(x = EthnicCategory)) + geom_bar() + xlab('EthnicCategory') +
+  facet_wrap(~efi_cat_moderate)+ theme(axis.text.x=element_text(angle=15))
+png(paste(path,'0_ethnicity_splits_mod.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p4)
+dev.off()
+
+```
+
+
+# function to get linear model outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model = function(data, path, form_str, model_name, res_plots_f, shapirotest_f){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=F, confint=TRUE, digits = 5, ciwidth=0.05 ) )
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+if (res_plots_f ==T) {
+    crPlots(m1)
+    resplot = recordPlot()
+    png(paste(path,model_name,'_plot5_crPlots.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(resplot)
+    dev.off() }
+
+if (shapirotest_f ==T) {
+  
+    high_lev_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    high_leverage_threshold = 2*(p+1)/n
+    out = data.frame(high_leverage_threshold = c(high_leverage_threshold))
+    return(out)}
+
+    cooks_distance_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    cooks_distance_thresh_t = 4/(n-p-1)
+    out = data.frame(cooks_distance_thresh = c(cooks_distance_thresh_t))
+    return(out)}
+    
+    ## check normality of residuals
+    # if p value > 0.05, distribution can be considered as normal
+    stest = shapiro.test(m1$residuals)
+    h_lev = high_lev_thresh(m1)
+    cooks_d = cooks_distance_thresh(m1)
+    
+    df2 = setNames( data.frame(matrix(ncol = 3, nrow = 0)), c('c1','c2','c3')   )
+    df2[nrow(df2) + 1,] = c( 'High leverage',h_lev, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Cooks distance ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Shapiro test ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( 'W',stest[1],'')
+    df2[nrow(df2) + 1,] = c( 'p',stest[2],'')
+    
+    if (stest[2] < 0.05) {out = 'Residuals are not normally distributed'}
+    if (stest[2] >= 0.05) {out = 'Residuals are normally distributed'}
+    df2[nrow(df2) + 1,] = c( 'Conclusion:',out,'')
+    
+    write.csv(df2, paste(path,model_name,'_shapiro_cooks_leverage.csv', sep = '') )
+    }
+}
+```
+
+
+#  function to get model with splines outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model2 = function(data, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary_splines.txt',sep = ''))
+print( summary(m1) )
+ 
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+
+}
+```
+
+# run base linear model: Count ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '1_efi_base_lm'
+form_str = as.formula('Count ~ carer+Gender+age+IMDDecile')
+run_and_save_the_model(efi, path, form_str, model_name,T,F)
+```
+
+# run linear model with splines for age: Count ~ carer+Gender+bs(age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+
+model_name = '14_efi_lm_splines3_age'
+form_str = as.formula('Count ~ carer+Gender+bs(age)+IMDDecile+EthnicCategory')
+run_and_save_the_model2(efi, path, form_str, model_name)
+```
+
+# run linear model where Y is modelled as log: log(Count) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '2_efi_base_lm_logY'
+form_str = as.formula('log(Count) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(efi, path, form_str, model_name,F,F)
+```
+
+# run linear model where Y is modelled as sqrt: sqrt(Count) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '3_efi_base_lm_sqrtY'
+form_str = as.formula('sqrt(Count) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(efi, path, form_str, model_name,F,F)
+```
+
+# run linear model where Y is modelled as sqrt and age is exponentiated: sqrt(Count) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '4_efi_base_lm_expAge'
+form_str = as.formula('sqrt(Count) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory')
+run_and_save_the_model(efi, path, form_str, model_name,F,F)
+```
+
+# run linear model where Y is modelled as log and age is exponentiated: log(Count) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '5_efi_base_lm_expAge_logY'
+form_str = as.formula('log(Count) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory')
+run_and_save_the_model(efi, path, form_str, model_name,F,F)
+```
+
+
+# function for running logistic regression
+```{r pressure, echo=FALSE}
+run_and_save_the_model_logr = function(data, out_true, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = glm(form_str, data = data, family=binomial)
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=T, digits = 5, confint=TRUE, ciwidth=0.05 ) )
+ 
+sink()
+
+
+# conf matrix
+  pred = as.factor(ifelse(fitted(m1) >=.5, 1, 0))
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==1) ) {levels(pred)[length(levels(pred))+1] = '0'}
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==0) ){levels(pred)[length(levels(pred))+1] = '1'}
+  
+
+sink(file = paste(path,model_name,'_conf.matrix.txt', sep = ''))
+print(   confusionMatrix(pred, as.factor(out_true) )   )
+sink()
+
+binnedplot(fitted(m1), residuals(m1, type = 'response'), 
+           nclass = NULL,xlab='Expected values',ylab='Average residual',
+           main='Binned residual plot',
+           cex.pts=0.8,col.pts=1,col.int='grey')
+b1 = recordPlot()
+png(paste(path,model_name,'_plot1_binned_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(b1)
+    dev.off()
+
+# roc auc
+      # out_true = efi$efi15 (0,1 - numeric)
+invisible(  plot(    roc(out_true, fitted(m1)   ),print.auc=T, col='red'      )  )
+pauc = recordPlot()
+png(paste(path,model_name,'_plot2_roc_auc.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(pauc)
+    dev.off()
+
+# calibration plot
+data_plot = data
+#data_plot$pred = predict.glm(m1, type='response')
+#calibration_plot(data = data_plot, obs=out_true, pred=pred,'Calibration plot')
+
+data_plot$y = out_true
+data_plot$pred = predict.glm(m1, type = 'response')
+
+
+c_plot = calibration_plot(data_plot, obs='y',  pred='pred' )
+#c_plot = recordPlot()
+png(paste(path,model_name,'_plot3_calibration_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+print(c_plot)
+dev.off()    
+    
+}
+```
+
+
+
+# run logistic regression for variious threshold for splitting EFI
+```{r pressure, echo=FALSE}
+form_str = as.formula('efi15 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi15, path, form_str, '6_logr_efi15')
+form_str = as.formula('efi16 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi16, path, form_str, '7_logr_efi16')
+form_str = as.formula('efi17 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi17, path, form_str, '8_logr_efi17')
+form_str = as.formula('efi18 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi18, path, form_str, '9_logr_efi18')
+form_str = as.formula('efi19 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi19, path, form_str, '10_logr_efi19')
+form_str = as.formula('efi_cat_mild ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi_cat_mild, path, form_str, '11_logr_efi_mild')
+form_str = as.forsula('efi_cat_moderate ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi_cat_moderate, path, form_str, '12_logr_efi_moderate')
+form_str = as.formula('efi_cat_severe ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(efi, efi$efi_cat_severe, path, form_str, '13_logr_efi_severe')
+
+```
+
+
+
+
+# save figures for '12_logr_efi_moderate' log model
+
+```{r pressure, echo=FALSE}
+m1 = glm(efi_cat_moderate ~ carer+Gender+age+IMDDecile+EthnicCategory, data = efi, family=binomial)
+
+model_name = '12_logr_efi_moderate'
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=T, digits = 5, confint=TRUE, ciwidth=0.05 ) )
+sink()
+# conf matrix
+pred = as.factor(ifelse(fitted(m1) >=.5, 1, 0))
+if ( (length(levels(pred))==1) & (levels(pred)[1]==1) ) {levels(pred)[length(levels(pred))+1] = '0'}
+if ( (length(levels(pred))==1) & (levels(pred)[1]==0) ){levels(pred)[length(levels(pred))+1] = '1'}
+```
+
+###Binned plot
+```{r pressure, echo=FALSE}
+path = 'S://NDL/MouleshWorkings/2_efi_pam_bmi/efi0/'
+
+model_name = '12_logr_efi_moderate'
+
+x = fitted(m1)
+n <- length(x)
+nclass = NULL
+if (is.null(nclass)) {
+  if (n >= 100) {
+    nclass = floor(sqrt(length(x)))
+  }
+  if (n > 10 & n < 100) {
+    nclass = 10
+  }
+  if (n <= 10) {
+    nclass = floor(n/2)
+  }
+}
+
+aa = data.frame(binned.resids(fitted(m1), residuals(m1, type = 'response'), nclass)$binned)
+write.csv(aa, paste(path,model_name,'_binned_plot.csv', sep = ''))
+xlab='Expected values'
+ylab='Average residual'
+main='Binned residual plot'
+cex.pts=0.8
+col.pts=1
+col.int='grey'
+
+plot(range(aa$xbar), range(aa$ybar, aa$X2se, -aa$X2se, na.rm = TRUE), 
+     xlab = xlab, ylab = ylab, type = "n", cex.lab=1.5,cex.axis=1.2)
+abline(0, 0, lty = 2)
+lines(aa$xbar, aa$X2se, col = col.int)
+lines(aa$xbar, -aa$X2se, col = col.int)
+points(aa$xbar, aa$ybar, pch = 19, cex = cex.pts, col = col.pts)
+p1 = recordPlot()
+png(paste(path,model_name,'_binned_plot.png', sep = ''), 
+        width = 15, height = 10, units = 'cm', res = 300  )
+print(p1)
+dev.off() 
+
+```
+
+
+###AUC plot
+```{r pressure, echo=FALSE}
+
+out_true = efi$efi_cat_moderate
+invisible(  plot(    roc(out_true, fitted(m1)   ),print.auc=T, col='red',cex.lab=1.5,cex.axis=1.2    )  )
+pauc = recordPlot()
+jpeg(paste(path,model_name,'_plot2_roc_auc.png', sep = ''), 
+        width = 12, height = 10, units = 'cm', res = 300  )
+    print(pauc)
+    dev.off()
+    
+a = roc(out_true, fitted(m1))
+df = as.data.frame(a$thresholds)
+df$sensitivities = a$sensitivities 
+df$specificities = a$specificities  
+write.csv(df, paste(path,model_name,'_auc_plot.csv', sep = ''))
+
+
+```
+
+
+
+
+
+
+
+
+# Figures for final log model: 
+```{r pressure, echo=FALSE}
+m1 = glm(form_str, data = efi, family=binomial)
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=T, digits = 5, confint=TRUE, ciwidth=0.05 ) )
+ 
+sink()
+
+
+# conf matrix
+  pred = as.factor(ifelse(fitted(m1) >=.5, 1, 0))
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==1) ) {levels(pred)[length(levels(pred))+1] = '0'}
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==0) ){levels(pred)[length(levels(pred))+1] = '1'}
+  
+
+sink(file = paste(path,model_name,'_conf.matrix.txt', sep = ''))
+print(   confusionMatrix(pred, as.factor(out_true) )   )
+sink()
+
+binnedplot(fitted(m1), residuals(m1, type = 'response'), 
+           nclass = NULL,xlab='Expected values',ylab='Average residual',
+           main='Binned residual plot',
+           cex.pts=0.8,col.pts=1,col.int='grey')
+b1 = recordPlot()
+png(paste(path,model_name,'_plot1_binned_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(b1)
+    dev.off()
+
+# roc auc
+      # out_true = efi$efi15 (0,1 - numeric)
+invisible(  plot(    roc(out_true, fitted(m1)   ),print.auc=T, col='red'      )  )
+pauc = recordPlot()
+png(paste(path,model_name,'_plot2_roc_auc.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(pauc)
+    dev.off()
+
+# calibration plot
+data_plot = efi
+#data_plot$pred = predict.glm(m1, type='response')
+#calibration_plot(data = data_plot, obs=out_true, pred=pred,'Calibration plot')
+
+data_plot$y = out_true
+data_plot$pred = predict.glm(m1, type = 'response')
+
+
+c_plot = calibration_plot(data_plot, obs='y',  pred='pred' )
+#c_plot = recordPlot()
+png(paste(path,model_name,'_plot3_calibration_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+print(c_plot)
+dev.off()    
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

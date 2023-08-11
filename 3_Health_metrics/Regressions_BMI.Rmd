@@ -1,0 +1,393 @@
+---
+title: '1'
+output: html_document
+date: '2022-11-24'
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(car)
+library(jtools)
+library(splines)
+library(caret)
+library(arm)
+library(pROC)
+library(predtools)
+```
+
+# loading data formatting variables and preprocessing 
+```{r pressure, echo=FALSE}
+bmi = read.csv('S://NDL/MouleshWorkings/Extracts2/BMI_carer_start_adjusted.csv')
+
+bmi = add_column(bmi,carer = ifelse(bmi$MatchedPatientKey == 'carer', 1, 0), .after = 'group' )
+bmi$carer = as.factor(bmi$carer)
+
+bmi$BMI_Value = as.numeric(bmi$BMI_Value)
+#final_table4$carer = as.factor(final_table4$carer)
+#final_table4$IMDDecile = as.factor(final_table4$IMDDecile)
+bmi$IMDDecile = as.numeric(  as.character(bmi$IMDDecile )  )
+#final_table4$age = as.factor(final_table4$age)
+bmi$age = as.numeric(  as.character(bmi$age )  )
+bmi$Gender = as.factor(bmi$Gender)
+bmi$EthnicCategory = as.factor(bmi$EthnicCategory)
+
+# remove irrelevant data
+bmi = bmi[!bmi$IMDDecile==-2,]
+bmi = bmi[!bmi$Gender=='Other',]
+```
+
+
+## Path for loading
+```{r pressure, echo=FALSE}
+path = 'S://NDL/MouleshWorkings/2_efi_pam_bmi/bmi/'
+
+```
+
+## create binary outcome for BMI counts
+```{r pressure, echo=FALSE}
+p0 = ggplot(bmi,aes(x = carer, y = BMI_Value))+geom_bar(stat='summary', fun.y='mean')
+     ggplot(bmi,aes(x = carer, y = BMI_Value))+geom_bar(stat='summary', fun.y='mean')
+
+png(paste(path,'0__bmi_vs_carer.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p0)
+dev.off()
+
+
+sink(file = paste(path,'0_mean BMI_vs_carer.txt',sep = ''))
+print( 'Mean for controls' )
+print( mean(bmi[bmi$carer==0,]$BMI_Value) )
+
+print( 'Mean for carers' )
+print( mean(bmi[bmi$carer==1,]$BMI_Value) )
+
+sink()
+
+
+```
+
+
+## create binary outcome for BMI counts
+```{r pressure, echo=FALSE}
+bmi$bmi_cat_above25 = ifelse(bmi$BMI_Value>25,1,0)
+bmi$bmi_cat_above27 = ifelse(bmi$BMI_Value>27,1,0)
+bmi$bmi_cat_above30 = ifelse(bmi$BMI_Value>30,1,0)
+bmi$bmi_cat_above35 = ifelse(bmi$BMI_Value>35,1,0)
+bmi$bmi_cat_above40 = ifelse(bmi$BMI_Value>40,1,0)
+bmi$bmi_cat_above45 = ifelse(bmi$BMI_Value>45,1,0)
+```
+
+
+# some descriptive graphs to compare group with various BMI binary splits
+```{r pressure, echo=FALSE}
+if (!file.exists(path)) {dir.create(path)}
+
+p0 = ggplot(bmi,aes(x = BMI_Value)) + geom_histogram(binwidth=1) + xlab('BMI') 
+png(paste(path,'0__bmi_0_no_split.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p0)
+dev.off()
+
+
+p1 = ggplot(bmi,aes(x = BMI_Value)) + geom_histogram(binwidth=1) + xlab('BMI') +  facet_wrap(~bmi_cat_above35)
+png(paste(path,'0_bmi_bmi_split35.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+
+
+p1 = ggplot(bmi,aes(x = age)) + geom_histogram(binwidth=5) + xlab('Age') + facet_wrap(~bmi_cat_above35)
+png(paste(path,'0_age_bmi_split35.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+p2 = ggplot(bmi,aes(x = Gender)) + geom_bar() + xlab('Gender') +  facet_wrap(~bmi_cat_above35)
+png(paste(path,'0_gender_bmi_split35.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p2)
+dev.off()
+
+p3 = ggplot(bmi, aes(x = IMDDecile)) +
+  geom_bar() + xlab('IMDDecile') +
+  scale_x_continuous(breaks = scales::pretty_breaks(n= 10)) +
+  facet_wrap(~bmi_cat_above35)+
+  labs(x = 'IMDDecile', y = 'Counts') 
+  #theme(axis.text = element_text(size = 20))+
+  #theme(axis.title = element_text(size = 24, face = 'bold'))
+png(paste(path,'0_imd_bmi_split35.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p3)
+dev.off()
+
+p4 = ggplot(bmi, aes(x = EthnicCategory)) + geom_bar() + xlab('EthnicCategory') +
+  facet_wrap(~bmi_cat_above35)+ theme(axis.text.x=element_text(angle=15))
+png(paste(path,'0_ethnicity_bmi_split35.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p4)
+dev.off()
+
+```
+
+
+# function to get linear model outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model = function(data, path, form_str, model_name, res_plots_f, shapirotest_f){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=F, confint=TRUE, digits = 5, ciwidth=0.05 ) )
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+if (res_plots_f ==T) {
+    crPlots(m1)
+    resplot = recordPlot()
+    png(paste(path,model_name,'_plot5_crPlots.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(resplot)
+    dev.off() }
+
+if (shapirotest_f ==T) {
+  
+    high_lev_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    high_leverage_threshold = 2*(p+1)/n
+    out = data.frame(high_leverage_threshold = c(high_leverage_threshold))
+    return(out)}
+
+    cooks_distance_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    cooks_distance_thresh_t = 4/(n-p-1)
+    out = data.frame(cooks_distance_thresh = c(cooks_distance_thresh_t))
+    return(out)}
+    ## check normality of residuals
+    # if p value > 0.05, distribution can be considered as normal
+    stest = shapiro.test(m1$residuals)
+    h_lev = high_lev_thresh(m1)
+    cooks_d = cooks_distance_thresh(m1)
+    
+    df2 = setNames( data.frame(matrix(ncol = 3, nrow = 0)), c('c1','c2','c3')   )
+    df2[nrow(df2) + 1,] = c( 'High leverage',h_lev, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Cooks distance ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Shapiro test ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( 'W',stest[1],'')
+    df2[nrow(df2) + 1,] = c( 'p',stest[2],'')
+    
+    if (stest[2] < 0.05) {out = 'Residuals are not normally distributed'}
+    if (stest[2] >= 0.05) {out = 'Residuals are normally distributed'}
+    df2[nrow(df2) + 1,] = c( 'Conclusion:',out,'')
+    
+    write.csv(df2, paste(path,model_name,'_shapiro_cooks_leverage.csv', sep = '') )
+    }
+
+
+}
+```
+
+#  function to get linear model with splines outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model2 = function(data, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary_splines.txt',sep = ''))
+print( summary(m1) )
+ 
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+
+}
+```
+
+# run base linear model: BMI_Value ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T 
+model_name = '1_bmi_base_lm'
+form_str = as.formula('BMI_Value ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name, T, F)
+```
+
+# run linear model where age is exponentiated: BMI_Value ~ carer+Gender+I((0.05*age+3)^2)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '2_bmi_base_lm_Age2'
+form_str = as.formula('BMI_Value ~ carer+Gender+I((0.05*age+3)^2)+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name, F, F)
+```
+
+# run linear model where age squared: BMI_Value ~ carer+Gender+I(age^2)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '2_3_bmi_base_lm_Age2'
+form_str = as.formula('BMI_Value ~ carer+Gender+I(age^2)+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name, T, F)
+```
+
+# run linear model where Y is modelled as log: log(BMI_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T 
+model_name = '3_bmi_log_base_lm'
+form_str = as.formula('log(BMI_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name, F, F)
+```
+
+# run linear model where Y is modelled as sqrt: sqrt(BMI_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T
+model_name = '4_bmi_base_lm_sqrtY'
+form_str = as.formula('sqrt(BMI_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name,F,F)
+```
+
+# run linear model where Y is modelled as log and age is exponentiated: log(BMI_Value) ~ carer+Gender+exp(age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '5_bmi_base_lm_expAge_logY'
+form_str = as.formula('log(BMI_Value) ~ carer+Gender+exp(age)+IMDDecile+EthnicCategory')
+run_and_save_the_model(bmi, path, form_str, model_name, F, F)
+```
+
+# run linear model with splines for age: BMI_Value ~ carer+Gender+bs(age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '6_bmi_base_lm_splineAge_Y'
+form_str = as.formula('BMI_Value ~ carer+Gender+bs(age)+IMDDecile+EthnicCategory')
+run_and_save_the_model2(bmi, path, form_str, model_name)
+```
+
+
+
+
+# running logistic regression
+```{r pressure, echo=FALSE}
+run_and_save_the_model_logr = function(data, out_true, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = glm(form_str, data = data, family=binomial)
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=T, digits = 5, confint=TRUE, ciwidth=0.05 ) )
+sink()
+
+
+# conf matrix
+  pred = as.factor(ifelse(fitted(m1) >=.5, 1, 0))
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==1) ) {levels(pred)[length(levels(pred))+1] = '0'}
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==0) ){levels(pred)[length(levels(pred))+1] = '1'}
+  
+
+sink(file = paste(path,model_name,'_conf.matrix.txt', sep = ''))
+print(   confusionMatrix(pred, as.factor(out_true) )   )
+sink()
+
+binnedplot(fitted(m1), residuals(m1, type = 'response'), 
+           nclass = NULL,xlab='Expected values',ylab='Average residual',
+           main='Binned residual plot',
+           cex.pts=0.8,col.pts=1,col.int='grey')
+b1 = recordPlot()
+png(paste(path,model_name,'_plot1_binned_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(b1)
+    dev.off()
+
+# roc auc
+      # out_true = efi$efi15 (0,1 - numeric)
+invisible(  plot(    roc(out_true, fitted(m1)   ),print.auc=T, col='red'      )  )
+pauc = recordPlot()
+png(paste(path,model_name,'_plot2_roc_auc.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(pauc)
+    dev.off()
+
+# calibration plot
+data_plot = data
+#data_plot$pred = predict.glm(m1, type='response')
+#calibration_plot(data = data_plot, obs=out_true, pred=pred,'Calibration plot')
+
+data_plot$y = out_true
+data_plot$pred = predict.glm(m1, type = 'response')
+
+c_plot = calibration_plot(data_plot, obs='y',  pred='pred' )
+#c_plot = recordPlot()
+png(paste(path,model_name,'_plot3_calibration_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+print(c_plot)
+dev.off()   
+  
+}
+```
+
+
+
+
+
+# run logistic regression for variious threshold for splitting BMI
+```{r pressure, echo=FALSE}
+form_str = as.formula('bmi_cat_above27 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(bmi, bmi$bmi_cat_above27, path, form_str, '7_1_bmi_cat_above27')
+form_str = as.formula('bmi_cat_above30 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(bmi, bmi$bmi_cat_above30, path, form_str, '8_bmi_cat_above30')
+form_str = as.formula('bmi_cat_above35 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(bmi, bmi$bmi_cat_above35, path, form_str, '9_bmi_cat_above35')
+form_str = as.formula('bmi_cat_above40 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(bmi, bmi$bmi_cat_above40, path, form_str, '10_bmi_cat_above40')
+form_str = as.formula('bmi_cat_above45 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(bmi, bmi$bmi_cat_above45, path, form_str, '11_bmi_cat_above45')
+
+```
+
+
+

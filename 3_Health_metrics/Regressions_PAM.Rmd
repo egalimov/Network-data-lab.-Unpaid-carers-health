@@ -1,0 +1,380 @@
+---
+""
+#author: Evgeny Galimov
+""
+date: '2022-11-24'
+---
+
+```{r setup, include=FALSE}
+library(dplyr)
+library(tidyverse)
+library(car)
+library(jtools)
+library(splines)
+library(caret)
+library(arm)
+library(pROC)
+library(predtools)
+```
+
+# loading data formatting variables and preprocessing 
+```{r pressure, echo=FALSE}
+final_table4 = read.csv('S://NDL/MouleshWorkings/Extracts2/PAM_carer_start_adjusted.csv')
+
+final_table4 = final_table4[!is.na(final_table4$PAM_Value),]
+
+final_table4 = add_column(final_table4,carer = ifelse(final_table4$MatchedPatientKey == 'carer',1, 0), .after = 'group' )
+
+final_table4$PAM_Value = as.numeric(final_table4$PAM_Value)
+final_table4$IMDDecile = as.numeric(  as.character(final_table4$IMDDecile )  )
+final_table4$age = as.numeric(  as.character(final_table4$age )  )
+final_table4$Gender = as.factor(final_table4$Gender)
+final_table4$EthnicCategory = as.factor(final_table4$EthnicCategory)
+
+# remove irrelevant data
+final_table4 = final_table4[!final_table4$IMDDecile==-2,]
+final_table4 = final_table4[!final_table4$Gender=='Other',]
+```
+
+
+## Path for loading
+```{r pressure, echo=FALSE}
+path = 'S://NDL/MouleshWorkings/2_efi_pam_bmi/pam/'
+```
+
+## Explore carer VS efi categories
+```{r pressure, echo=FALSE}
+summary(as.factor( final_table4$carer) )
+summary( as.factor(final_table4$pam_cat_above50) )
+```
+
+
+## create binary outcome for PAM counts
+```{r pressure, echo=FALSE}
+
+
+final_table4$pam_cat_above60 = ifelse(final_table4$PAM_Value>60,1,0)
+final_table4$pam_cat_above55 = ifelse(final_table4$PAM_Value>55,1,0)
+final_table4$pam_cat_above50 = ifelse(final_table4$PAM_Value>50,1,0)
+final_table4$pam_cat_above30 = ifelse(final_table4$PAM_Value>30,1,0)
+```
+
+# some descriptive graphs to compare group PAM split 50
+```{r pressure, echo=FALSE}
+if (!file.exists(path)) {dir.create(path)}
+
+
+
+
+p1 = ggplot(final_table4,aes(x = PAM_Value)) + geom_histogram(binwidth=1) + xlab('PAM') #+  facet_wrap(~efi15)
+png(paste(path,'0_PAM_hist.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+
+
+p1 = ggplot(final_table4,aes(x = age)) + geom_histogram(binwidth=5) + xlab('Age') + facet_wrap(~pam_cat_above50)
+png(paste(path,'0_age_splits50.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p1)
+dev.off()
+
+p2 = ggplot(final_table4,aes(x = Gender)) + geom_bar() + xlab('Gender') +  facet_wrap(~pam_cat_above50)
+png(paste(path,'0_gender_splits50.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p2)
+dev.off()
+
+p3 = ggplot(final_table4, aes(x = IMDDecile)) +
+  geom_bar() + xlab('IMDDecile') +
+  scale_x_continuous(breaks = scales::pretty_breaks(n= 10)) +
+  facet_wrap(~pam_cat_above50)+
+  labs(x = 'IMDDecile', y = 'Counts') 
+
+png(paste(path,'0_imd_splits50.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p3)
+dev.off()
+
+p4 = ggplot(final_table4, aes(x = EthnicCategory)) + geom_bar() + xlab('EthnicCategory') +
+  facet_wrap(~pam_cat_above50)+ theme(axis.text.x=element_text(angle=15))
+png(paste(path,'0_ethnicity_splits50.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+print(p4)
+dev.off()
+
+```
+
+
+# function to get linear model outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model = function(data, path, form_str, model_name, res_plots_f, shapirotest_f){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=F, confint=TRUE, digits = 5, ciwidth=0.05 ) )
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+if (res_plots_f ==T) {
+    crPlots(m1)
+    resplot = recordPlot()
+    png(paste(path,model_name,'_plot5_crPlots.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(resplot)
+    dev.off() }
+
+if (shapirotest_f ==T) {
+  
+    high_lev_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    high_leverage_threshold = 2*(p+1)/n
+    out = data.frame(high_leverage_threshold = c(high_leverage_threshold))
+    return(out)}
+
+    cooks_distance_thresh = function(fit){ 
+    p <- length(coefficients(fit))
+    n <- length(fitted(fit))
+    cooks_distance_thresh_t = 4/(n-p-1)
+    out = data.frame(cooks_distance_thresh = c(cooks_distance_thresh_t))
+    return(out)}
+    ## check normality of residuals
+    # if p value > 0.05, distribution can be considered as normal
+    stest = shapiro.test(m1$residuals)
+    h_lev = high_lev_thresh(m1)
+    cooks_d = cooks_distance_thresh(m1)
+    
+    df2 = setNames( data.frame(matrix(ncol = 3, nrow = 0)), c('c1','c2','c3')   )
+    df2[nrow(df2) + 1,] = c( 'High leverage',h_lev, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Cooks distance ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( '','','')
+    
+    df2[nrow(df2) + 1,] = c( 'Shapiro test ',cooks_d, '')
+    df2[nrow(df2) + 1,] = c( 'W',stest[1],'')
+    df2[nrow(df2) + 1,] = c( 'p',stest[2],'')
+    
+    if (stest[2] < 0.05) {out = 'Residuals are not normally distributed'}
+    if (stest[2] >= 0.05) {out = 'Residuals are normally distributed'}
+    df2[nrow(df2) + 1,] = c( 'Conclusion:',out,'')
+    
+    write.csv(df2, paste(path,model_name,'_shapiro_cooks_leverage.csv', sep = '') )
+    }
+
+
+}
+```
+
+
+#  function to get model with splines outputs
+```{r pressure, echo=FALSE}
+run_and_save_the_model2 = function(data, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = lm(form_str, data = data)
+
+
+sink(file = paste(path,model_name,'_summary_splines.txt',sep = ''))
+print( summary(m1) )
+ 
+sink()
+
+png(paste(path,model_name,'_plot1_res.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,1)
+dev.off()
+png(paste(path,model_name,'_plot2_QQ.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,2)
+dev.off()
+png(paste(path,model_name,'_plot3_scale_locs.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,3)
+dev.off()
+png(paste(path,model_name,'_plot4_lev.png', sep = ''), 
+    width = 20, height = 15, units = 'cm', res = 200  )
+plot(m1,5)
+dev.off()
+
+
+}
+```
+
+# run base linear model: PAM_Value ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T 
+model_name = '1_PAM_base_lm'
+form_str = as.formula('PAM_Value ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(final_table4, path, form_str, model_name, T, T)
+```
+
+# run linear model where Y is modelled as log: log(PAM_Value_non0) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T 
+# convert PAM score 0 to 0.001
+final_table4$PAM_Value_non0 = ifelse(final_table4$PAM_Value==0, 0.001, final_table4$PAM_Value)
+model_name = '2_pam_base_lm_logY'
+form_str = as.formula('log(PAM_Value_non0) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(final_table4, path, form_str, model_name, T, T)
+```
+
+# run linear model where Y is modelled as sqrt: sqrt(PAM_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = T
+shapirotest_f = T
+model_name = '3_pam_base_lm_sqrtY'
+form_str = as.formula('sqrt(PAM_Value) ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model(final_table4, path, form_str, model_name,T,T)
+```
+
+# run linear model where age is exponentiated: PAM_Value ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '4_pam_base_lm_expAge'
+form_str = as.formula('PAM_Value ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory')
+run_and_save_the_model(final_table4, path, form_str, model_name,T,T)
+```
+
+# run linear model where where Y is modelled as log and age is exponentiated: log(PAM_Value) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+res_plots_f = F
+shapirotest_f = F 
+model_name = '5_pam_base_lm_expAge_logY'
+form_str = as.formula('log(PAM_Value) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory')
+run_and_save_the_model(final_table4, path, form_str, model_name,T,T)
+```
+
+# run linear model where where Y is modelled as log and with splines for age: log(PAM_Value) ~ carer+Gender+exp(0.03*age)+IMDDecile+EthnicCategory
+```{r pressure, echo=FALSE}
+
+model_name = '9_pam_lm_splines3_age'
+form_str = as.formula('PAM_Value ~ carer+Gender+bs(age)+IMDDecile+EthnicCategory')
+run_and_save_the_model2(final_table4, path, form_str, model_name)
+```
+
+
+
+# function for running logistic regression
+```{r pressure, echo=FALSE}
+run_and_save_the_model_logr = function(data, out_true, path, form_str, model_name){
+
+if (!file.exists(path)) {dir.create(path)}
+m1 = glm(form_str, data = data, family=binomial)
+sink(file = paste(path,model_name,'_summary.txt', sep = ''))
+print( summ(m1, exp=T, digits = 5, confint=TRUE, ciwidth=0.05 ) )
+sink()
+
+
+# conf matrix
+  pred = as.factor(ifelse(fitted(m1) >=.5, 1, 0))
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==1) ) {levels(pred)[length(levels(pred))+1] = '0'}
+  if ( (length(levels(pred))==1) & (levels(pred)[1]==0) ){levels(pred)[length(levels(pred))+1] = '1'}
+  
+
+sink(file = paste(path,model_name,'_conf.matrix.txt', sep = ''))
+print(   confusionMatrix(pred, as.factor(out_true) )   )
+sink()
+
+binnedplot(fitted(m1), residuals(m1, type = 'response'), 
+           nclass = NULL,xlab='Expected values',ylab='Average residual',
+           main='Binned residual plot',
+           cex.pts=0.8,col.pts=1,col.int='grey')
+b1 = recordPlot()
+png(paste(path,model_name,'_plot1_binned_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(b1)
+    dev.off()
+
+# roc auc
+      # out_true = efi$efi15 (0,1 - numeric)
+invisible(  plot(    roc(out_true, fitted(m1)   ),print.auc=T, col='red'      )  )
+pauc = recordPlot()
+png(paste(path,model_name,'_plot2_roc_auc.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+    print(pauc)
+    dev.off()
+
+    
+# calibration plot
+data_plot = data
+
+data_plot$y = out_true
+data_plot$pred = predict.glm(m1, type = 'response')
+
+
+c_plot = calibration_plot(data_plot, obs='y',  pred='pred' )
+#c_plot = recordPlot()
+png(paste(path,model_name,'_plot3_calibration_plot.png', sep = ''), 
+        width = 20, height = 15, units = 'cm', res = 200  )
+print(c_plot)
+dev.off()  
+    
+}
+```
+
+
+
+
+
+
+# run logistic regression for variious threshold for splitting PAM score
+```{r pressure, echo=FALSE}
+form_str = as.formula('pam_cat_above60 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(final_table4, final_table4$pam_cat_above60, path, form_str, '5_logr_pam_above60')
+form_str = as.formula('pam_cat_above55 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(final_table4, final_table4$pam_cat_above55, path, form_str, '6_logr_pam_above55')
+form_str = as.formula('pam_cat_above50 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(final_table4, final_table4$pam_cat_above50, path, form_str, '6_logr_pam_above50')
+form_str = as.formula('pam_cat_above30 ~ carer+Gender+age+IMDDecile+EthnicCategory')
+run_and_save_the_model_logr(final_table4, final_table4$pam_cat_above30, path, form_str, '7_logr_pam_above30')
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
