@@ -84,12 +84,12 @@ R version 4.2.1 <br>
 
 
 ### Authors 
-In this repository only code developed by Evgeniy Galimov is available: Data preprocessing, matching cohorts, long-term conditions distributions before becoming carers, the effect of being a carer on on frailty, BMI and self-management, and health care access
+Evgeniy Galimov: Data preprocessing, matching cohorts, long-term conditions distributions before becoming carers, the effect of being a carer on on frailty, BMI and self-management, and health care access (folders: 1_Matching_and_preprocessing, 2_LTCs_before_becoming_a_carer, 3_Health_metrics, 4_Healthcare_access)
 
 The code developed by other coauthors will be added later:<br> 
-Roberto Fernandez Crespo - Analysis of age-sex standardised rates for long-term conditions and the effect of being a carer and the COVID-19 pandemic on referrals by specialty rates<br> 
-Moulesh Shah - Data extraction<br> 
-Sandeep Parshar - Descriptive analysis<br> 
+Roberto Fernandez Crespo - Analysis of age-sex standardised rates for long-term conditions and the effect of being a carer and the COVID-19 pandemic on referrals by specialty rates (folders: 5_COVIDeffect_on_referrals and 6_Age-sex_standardised_rate)<br> 
+Moulesh Shah - Data extraction (Code is not loaded yet)<br> 
+Sandeep Parshar - Descriptive analysis (Code is not loaded yet)<br> 
 
 
 ### License
